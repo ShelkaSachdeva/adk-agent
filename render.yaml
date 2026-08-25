@@ -1,0 +1,22 @@
+# Render blueprint. Commit this at the repo root, then in Render:
+# New → Blueprint → pick this repo. Set GOOGLE_API_KEY in the dashboard.
+services:
+  - type: web
+    name: banking-agent-api
+    runtime: python
+    plan: free
+    rootDir: .
+    buildCommand: pip install -r api/requirements.txt
+    startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: GOOGLE_API_KEY
+        sync: false          # set this by hand in the Render dashboard
+      - key: GOOGLE_GENAI_USE_VERTEXAI
+        value: "FALSE"
+      - key: DAILY_QUESTION_LIMIT
+        value: "5"
+      - key: ALLOWED_ORIGINS
+        value: "https://ideaiskey.com,https://www.ideaiskey.com"
+      - key: PYTHON_VERSION
+        value: "3.11.9"
