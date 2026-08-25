@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Interactive demo of a Google ADK multi-agent banking assistant backed by Supabase, with a live agent-flow diagram, execution trace and SSN masking.">
+<meta name="description" content="Interactive demo of a Google ADK multi-agent banking assistant, with a live agent-flow diagram, execution trace and SSN masking.">
 <title>Banking Agent Console</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -202,6 +202,7 @@
   }
 
   .pill-demo { border-color: var(--flag); background: var(--flag-wash); color: var(--flag); }
+  .pill-live { border-color: var(--accent); background: var(--accent-wash); color: var(--accent-deep); }
   .pill-tool { border-color: var(--tool);
     border-color: color-mix(in srgb, var(--tool) 45%, transparent); background: var(--tool-wash); color: var(--tool); }
 
@@ -924,7 +925,7 @@
     </div>
     <div class="masthead-side">
       <div class="pill-row">
-        <span class="pill pill-demo">Simulated — no live runtime</span>
+        <span class="pill pill-demo" id="pillMode">Simulated — no live runtime</span>
         <span class="pill pill-tool" id="pillAgents">banking_agent</span>
       </div>
       <button class="ghost-btn" id="themeToggle" type="button">Switch theme</button>
@@ -1238,12 +1239,34 @@
   /* ------------------------------------------------------------------
      State
      ------------------------------------------------------------------ */
+  /* ------------------------------------------------------------------
+     Live agent, when one is configured.
+
+     Set it either way:
+       1. add a script tag before this one that sets
+          window.BANK_API_BASE = "https://your-api.onrender.com";
+       2. or append ?api=https://your-api.onrender.com to the page URL, to
+          try an endpoint without editing the file.
+
+     With nothing set the page runs its built-in simulation, exactly as
+     before, so the GitHub Pages copy keeps working with no backend.
+     ------------------------------------------------------------------ */
+  const DEFAULT_API_BASE = "https://banking-agent-api.onrender.com";
+
+  // ?api=<url> overrides for a quick test; ?api= (empty) forces the
+  // simulation, which is handy when demoing without spending the budget.
+  const apiParam = new URLSearchParams(location.search).get("api");
+  const API_BASE = (
+    apiParam !== null ? apiParam : (window.BANK_API_BASE || DEFAULT_API_BASE)
+  ).trim().replace(/\/+$/, "");
+
   const state = {
     turns: 0,
     toolCalls: 0,
     busy: false,
     pendingReference: null,
-    lastTrace: []
+    lastTrace: [],
+    sessionId: null
   };
 
   const $ = (id) => document.getElementById(id);
@@ -1325,6 +1348,102 @@
      Run one turn: build the step list, then play it back with delays
      ------------------------------------------------------------------ */
   async function runTurn(userText) {
+    if (API_BASE) {
+      const handled = await runTurnLive(userText);
+      if (handled) return;
+      // connection failed — fall through to the simulation so the page
+      // still demonstrates something, with a visible note saying so.
+    }
+    return runTurnSimulated(userText);
+  }
+
+  /* ------------------------------------------------------------------
+     Live path: POST the question to the FastAPI wrapper around the ADK
+     agent and render whatever it reports. Returns false if the API could
+     not be reached at all, true otherwise.
+     ------------------------------------------------------------------ */
+  async function runTurnLive(userText) {
+    const bubble = openAssistantBubble();
+    setStatus(bubble, "Sending to the live agent…");
+    highlight({ agent: "banking_agent", tools: [], live: true });
+
+    // Free hosting sleeps when idle; say so rather than looking hung.
+    const slowNotice = setTimeout(() => {
+      setStatus(bubble, "Waking the API — the first request after a quiet spell takes ~30s…");
+    }, 3500);
+
+    let response;
+    try {
+      response = await fetch(API_BASE + "/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: userText, session_id: state.sessionId })
+      });
+    } catch (error) {
+      clearTimeout(slowNotice);
+      bubble.remove();
+      highlight({ agent: "banking_agent", tools: [], live: false });
+      note("Couldn't reach the live agent, so this answer comes from the built-in demo.");
+      return false;
+    }
+    clearTimeout(slowNotice);
+
+    let data = {};
+    try { data = await response.json(); } catch (error) { data = {}; }
+
+    if (!response.ok) {
+      setStatus(bubble, null);
+      const detail = data.detail || ("The agent returned " + response.status + ".");
+      bubble.querySelector("[data-body]").innerHTML = "<p>" + escapeHTML(detail) + "</p>";
+      highlight({ agent: "banking_agent", tools: [], live: false });
+      return true;
+    }
+
+    state.sessionId = data.session_id || state.sessionId;
+    const trace = Array.isArray(data.trace) ? data.trace : [];
+
+    renderTrace($("tracePanel"), trace);
+    setStatus(bubble, null);
+    await typeInto(bubble, [escapeHTML(data.answer || "")]);
+
+    const agent = data.agent || "banking_agent";
+    finishBubble(bubble, agent, Number(data.elapsed) || 0, trace);
+    highlight({
+      agent,
+      tools: trace.filter(s => s.kind === "call").map(s => s.tool),
+      live: false
+    });
+
+    state.lastTrace = trace;
+    state.turns += 1;
+    state.toolCalls += trace.filter(s => s.kind === "call").length;
+    updateMetrics(agent, Number(data.elapsed) || 0);
+
+    if (typeof data.questions_remaining === "number") {
+      setModePill(data.questions_remaining);
+    }
+    $("flowNote").textContent = "last turn";
+    return true;
+  }
+
+  function note(text) {
+    const el = document.createElement("div");
+    el.className = "clarify";
+    el.innerHTML = '<div class="clarify-from">Interface · not the agent</div>' +
+      '<div class="clarify-q">' + escapeHTML(text) + "</div>";
+    thread.appendChild(el);
+    scrollThread();
+  }
+
+  function setModePill(remaining) {
+    const pill = $("pillMode");
+    if (!pill) return;
+    pill.className = "pill pill-live";
+    pill.innerHTML = '<span class="beacon"></span> Live agent · ' +
+      remaining + " question" + (remaining === 1 ? "" : "s") + " left today";
+  }
+
+  async function runTurnSimulated(userText) {
     const intent = plan(userText);
     const trace = [];
     const paragraphs = [];
@@ -1807,6 +1926,17 @@
 
   highlight({ agent: "banking_agent", tools: [], live: false });
   $("flowNote").textContent = "idle";
+
+  // If an API is configured, say so up front — but only once it answers.
+  // A dead URL should leave the page honestly labelled as simulated.
+  if (API_BASE) {
+    fetch(API_BASE + "/health")
+      .then(response => (response.ok ? response.json() : null))
+      .then(data => {
+        if (data) setModePill(data.questions_remaining ?? 0);
+      })
+      .catch(() => { /* stay labelled as simulated */ });
+  }
 })();
 </script>
 
