@@ -17,6 +17,8 @@ services:
       - key: DAILY_QUESTION_LIMIT
         value: "5"
       - key: ALLOWED_ORIGINS
-        value: "https://ideaiskey.com,https://www.ideaiskey.com"
+        # "*" while you test from a local file or GitHub Pages.
+        # Tighten to "https://ideaiskey.com,https://www.ideaiskey.com" once it is wired in.
+        value: "*"
       - key: PYTHON_VERSION
         value: "3.11.9"
