@@ -9,7 +9,7 @@ Live demo: **[ideaiskey.com/bankconsole.html](https://www.ideaiskey.com/bankcons
 
 ![The Banking Agent Console answering a customer lookup: the flow diagram shows banking_agent
 delegating to customer_agent, which calls get_customer_info, reads banking.db and passes the row
-through mask_ssn(); the answer reports only that the SSN ends in 1010.](docs/console.png)
+through mask_ssn(); the answer reports only that the SSN ends in 1010.](docs/console-v2.png)
 
 The diagram is not decoration — it is drawn from the actual ADK events for the turn you just ran.
 Green is the agent that answered, blue the tool it called, amber the masking step, and the grey
