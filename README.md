@@ -1,4 +1,4 @@
-# Banking Agent
+# Banking Conversational AI Agent 
 
 A multi-agent conversational banking assistant built on the **Google Agent Development Kit (ADK)**.
 A routing agent answers balance questions itself and hands customer questions to a specialist
